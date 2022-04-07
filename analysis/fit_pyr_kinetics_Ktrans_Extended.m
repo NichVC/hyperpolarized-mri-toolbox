@@ -1,4 +1,4 @@
-function [params_fit, Sfit, ufit, error_metrics] = fit_pyr_kinetics_Ktrans_Extended_NVC(S, TR, flips, params_fixed, params_est, noise_level, plot_flag)
+function [params_fit, Sfit, ufit, error_metrics] = fit_pyr_kinetics_Ktrans_Extended(S, TR, flips, params_fixed, params_est, noise_level, plot_flag)
 % fit_pyr_kinetics - Pharmacokinetic model fitting function for HP 13C MRI.
 %
 % Fits precursor-product kinetic model, assuming origination from a single
@@ -43,7 +43,7 @@ function [params_fit, Sfit, ufit, error_metrics] = fit_pyr_kinetics_Ktrans_Exten
 % Reserved.
 
 %%
-%% MODIFIED BY Nichlas Vous Christensen, February 2022
+%% MODIFIED BY Nichlas Vous Christensen, April 2022
 %%
 
 isOctave = exist('OCTAVE_VERSION', 'builtin') ~= 0;
@@ -207,7 +207,7 @@ for i=1:size(Sreshape, 1)
                 [params_fit_vec(i,:), objective_val(i)] = fminunc(obj, params_est_vec, options);
         end
         
-        [Mzfit, ufit(i,:)] = trajectories_inputless(params_fit_vec(i,:), params_fixed, TR,  Mzscale, Mz(1,:), Istart);
+        [Mzfit, ufit(i,:)] = trajectories_inputless(params_fit_vec(i,:), params_fixed, TR,  Mzscale, Mz(1,:), Mz(3,:), Istart);
         
         Sfit(i,:,:) = Mzfit(2:Nmets,:)  .* Sscale(2:Nmets, :);
         ufit(i,:) = ufit(i,:)  .* Sscale(1, :);
@@ -307,7 +307,7 @@ end
 end
 
 function diff_products = difference_inputless(params_fit, params_fixed, TR, Mzscale, Sscale, Mz, Istart, Nmets)
-Mzfit = trajectories_inputless(params_fit, params_fixed, TR,  Mzscale, Mz(1,:), Istart) ;
+Mzfit = trajectories_inputless(params_fit, params_fixed, TR,  Mzscale, Mz(1,:),Mz(3,:), Istart) ;
 temp_diff = (Mz - Mzfit) .* Sscale; % compute difference in the signal (Mxy) domain
 diff_products = temp_diff(2:Nmets,:); % only differences are in the metabolic products
 diff_products = diff_products(isfinite(diff_products));
@@ -323,7 +323,7 @@ function [ l1 ] = negative_log_likelihood_rician_inputless(params_fit, params_fi
 N = size(Mzscale,2);
 
 % compute trajectory of the model with parameter values
-Mzfit = trajectories_inputless(params_fit, params_fixed, TR,  Mzscale, Mz(1,:), Istart) ;
+Mzfit = trajectories_inputless(params_fit, params_fixed, TR,  Mzscale, Mz(1,:), Mz(3,:), Istart) ;
 
 % compute negative log likelihood
 l1 = 0;
@@ -341,7 +341,7 @@ for t = 1:N
 end
 end
 
-function [Mz_all, u] = trajectories_inputless( params_fit, params_fixed, TR, Mzscale , Mz_pyr, Istart)
+function [Mz_all, u] = trajectories_inputless( params_fit, params_fixed, TR, Mzscale , Mz_pyr, Mz_urea, Istart)
 % Compute product magnetizations using a uni-directional two-site model
 % Uses substrate magnetization measurements, estimated relaxation and
 % conversion rates
@@ -372,22 +372,25 @@ end
 % account for timepoints where no pyruvate flip applied
 I_pyruvate_flip = isfinite(Mz_pyr);
 Mz_pyr = interp1(find(I_pyruvate_flip), Mz_pyr(I_pyruvate_flip), 1:length(Mz_pyr),'linear',0);
+I_urea_flip = isfinite(Mz_urea);
+Mz_urea = interp1(find(I_urea_flip), Mz_urea(I_urea_flip), 1:length(Mz_urea),'linear',0);
 
 % force Mz pyruvate based on signal
 Mz_all(1,:) = Mz_pyr;
 Mz_all(2,Istart) = Mz0_L;
-Mz_all(3,Istart) = Mz0_U;
+Mz_all(3,:) = Mz_urea;
 
-A = [Ktrans_U,  0,                  0,     
-     0,         -R1P-kPL+Ktrans_U,  0,
-     0,         +kPL,               -R1L];
+A = [-R1P-kPL,     0,      0,     
+      +kPL,       -R1L,    0,
+      0,           0,     +Ktrans_U];
 
 for It=Istart:N-1
+    
     Mz_init = Mz_all(:,It) .* Mzscale(:, It);
     
     % estimate input, assuming this is constant during TR interval
     % This calculation could be improved for noise stability?
-    u(It) = Mz_pyr(It+1) * Ktrans_U;
+    u(It) = Mz_urea(It+1) * Ktrans_U;
     
     xstar = - inv(A)*[u(It),u(It),0].';
 
@@ -399,12 +402,12 @@ end
 
 % reverse in time
 for It=Istart:-1:2
-    
+      
     Mz_init = Mz_all(:,It);
     
     % estimate input, assuming this is constant during TR interval
     % This calculation could be improved for noise stability?
-    u(It-1) = Mz_pyr(It-1) * Ktrans_U;
+    u(It) = Mz_urea(It+1) * Ktrans_U;
     
     xstar = - inv(A)*[u(It-1),u(It-1),0].';
     
