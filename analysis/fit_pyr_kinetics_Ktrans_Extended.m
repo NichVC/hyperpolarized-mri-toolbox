@@ -1,4 +1,4 @@
-function [params_fit, Sfit, ufit, error_metrics] = fit_pyr_kinetics_Ktrans_Extended(S, TR, flips, params_fixed, params_est, noise_level, plot_flag)
+function [params_fit, Sfit, ufit, error_metrics] = fit_pyr_kinetics_NVC(S, TR, flips, params_fixed, params_est, noise_level, plot_flag)
 % fit_pyr_kinetics - Pharmacokinetic model fitting function for HP 13C MRI.
 %
 % Fits precursor-product kinetic model, assuming origination from a single
@@ -42,10 +42,6 @@ function [params_fit, Sfit, ufit, error_metrics] = fit_pyr_kinetics_Ktrans_Exten
 % (c)2015-2018 The Regents of the University of California. All Rights
 % Reserved.
 
-%%
-%% MODIFIED BY Nichlas Vous Christensen, April 2022
-%%
-
 isOctave = exist('OCTAVE_VERSION', 'builtin') ~= 0;
 
 
@@ -80,23 +76,22 @@ elseif any(size_flips ~= [Nmets Nt])
     error('Flip angles should be of size [Nmets Nt], [Nmets 1], or [1]')
 end
 
-params_all = {'kPL', ...
-              'R1P', 'R1L', 'R1U', ...
-              'Mz0_P', 'Mz0_L', 'Mz0_U', ...
-              'Ktrans_U'};
-
-params_default_est = [0.01 ...
-                      1/30, 1/25, 1/60, ...
-                      0, 0, 0, ...
-                      0.5] ;
-params_default_lb = [-Inf, ...
-                     1/50, 1/50, 1/100, ...
-                     -Inf, -Inf, -Inf, ...
-                     -Inf]; 
+params_all = {'kPL', 'kPB', 'kPA', ...
+    'R1P', 'R1L', 'R1A', 'R1B', ...
+    'Mz0_P', 'Mz0_L', 'Mz0_B', 'Mz0_A'};%, ...
+%    'Rinj', 'Tarrival', 'Tbolus'};
+params_default_est = [0.01, 0.01, 0.01, ...
+    1/30, 1/25, 1/25, 1/15, ...
+    0, 0, 0, 0] ;%, ...
+%    0.1, 0, 8];
+params_default_lb = [-Inf, -Inf, -Inf, ...
+    1/50, 1/50, 1/50, 1/50, ...
+    -Inf, -Inf, -Inf, -Inf]; %, ...
+%    0, -30, 0];
 params_default_ub = [Inf, Inf, Inf, ...
-                     1/10, 1/10, 1/5, ...
-                     Inf, Inf, Inf, ...
-                     Inf];
+    1/10, 1/10, 1/10, 1/5 , ...
+    Inf, Inf, Inf, Inf]; %, ...
+%    Inf 30 Inf];
 
 
 if nargin < 4 || isempty(params_fixed)
@@ -107,9 +102,20 @@ if nargin < 5 || isempty(params_est)
     params_est = struct([]);
 end
 
-products_string = {'lactate'};
+% Supports up to 3 metabolic products (e.g. alanine, lactate, bicarb)
+products_string = {'lactate', 'bicarb', 'alanine'};
+switch Nmets
+    case 2 % assume pyruvate & lactate
+        params_fixed.kPA = 0;  params_fixed.Mz0_A = 0;  params_fixed.R1A = 1;
+        params_fixed.kPB = 0;  params_fixed.Mz0_B = 0;  params_fixed.R1B = 1;
+        products_string = {'lactate'};
+    case 3 % assume pyruvate & lactate & bicarbonate
+        params_fixed.kPA = 0;   params_fixed.Mz0_A = 0;  params_fixed.R1A = 1;
+        products_string = {'lactate', 'bicarb'};
+end
 
 % By default, fix the relaxation rates
+
 
 
 I_params_est = [];
@@ -160,6 +166,10 @@ if plot_flag
 end
 
 Sreshape = reshape(S, [prod(Nx), Nmets, Nt]);  % put all spatial locations in first dimension
+if Nmets < 4
+    Sreshape = cat(2, Sreshape, zeros([prod(Nx) 4-Nmets, Nt]));  % add zero data for unused metabolites
+    flips = cat(1, flips, ones([4-Nmets, size(flips,2)]));
+end
 
 [Sscale, Mzscale] = flips_scaling_factors(flips, Nt);
 
@@ -170,7 +180,7 @@ Rsq = zeros([prod(Nx),Nmets-1]); CHIsq = zeros([prod(Nx),Nmets-1]);
 
 for i=1:size(Sreshape, 1)
     % observed magnetization (Mxy)
-    Mxy = reshape(Sreshape(i, :, :), [3, Nt]);
+    Mxy = reshape(Sreshape(i, :, :), [4, Nt]);
     
     if any(Mxy(:) ~= 0)
 
@@ -207,7 +217,7 @@ for i=1:size(Sreshape, 1)
                 [params_fit_vec(i,:), objective_val(i)] = fminunc(obj, params_est_vec, options);
         end
         
-        [Mzfit, ufit(i,:)] = trajectories_inputless(params_fit_vec(i,:), params_fixed, TR,  Mzscale, Mz(1,:), Mz(3,:), Istart);
+        [Mzfit, ufit(i,:)] = trajectories_inputless(params_fit_vec(i,:), params_fixed, TR,  Mzscale, Mz(1,:), Istart);
         
         Sfit(i,:,:) = Mzfit(2:Nmets,:)  .* Sscale(2:Nmets, :);
         ufit(i,:) = ufit(i,:)  .* Sscale(1, :);
@@ -307,7 +317,7 @@ end
 end
 
 function diff_products = difference_inputless(params_fit, params_fixed, TR, Mzscale, Sscale, Mz, Istart, Nmets)
-Mzfit = trajectories_inputless(params_fit, params_fixed, TR,  Mzscale, Mz(1,:),Mz(3,:), Istart) ;
+Mzfit = trajectories_inputless(params_fit, params_fixed, TR,  Mzscale, Mz(1,:), Istart) ;
 temp_diff = (Mz - Mzfit) .* Sscale; % compute difference in the signal (Mxy) domain
 diff_products = temp_diff(2:Nmets,:); % only differences are in the metabolic products
 diff_products = diff_products(isfinite(diff_products));
@@ -323,7 +333,7 @@ function [ l1 ] = negative_log_likelihood_rician_inputless(params_fit, params_fi
 N = size(Mzscale,2);
 
 % compute trajectory of the model with parameter values
-Mzfit = trajectories_inputless(params_fit, params_fixed, TR,  Mzscale, Mz(1,:), Mz(3,:), Istart) ;
+Mzfit = trajectories_inputless(params_fit, params_fixed, TR,  Mzscale, Mz(1,:), Istart) ;
 
 % compute negative log likelihood
 l1 = 0;
@@ -341,7 +351,7 @@ for t = 1:N
 end
 end
 
-function [Mz_all, u] = trajectories_inputless( params_fit, params_fixed, TR, Mzscale , Mz_pyr, Mz_urea, Istart)
+function [Mz_all, u] = trajectories_inputless( params_fit, params_fixed, TR, Mzscale , Mz_pyr, Istart )
 % Compute product magnetizations using a uni-directional two-site model
 % Uses substrate magnetization measurements, estimated relaxation and
 % conversion rates
@@ -354,10 +364,10 @@ end
 Nmets = size(Mzscale,1); N = size(Mzscale,2);
 Mz_all = zeros(Nmets, N);
 u = zeros(1,N);
-params_all = {'kPL', ...
-              'R1P', 'R1L', 'R1U', ...
-              'Mz0_P', 'Mz0_L', 'Mz0_U', ...
-              'Ktrans_U'};
+
+params_all = {'kPL', 'kPB', 'kPA', ...
+    'R1P', 'R1L', 'R1A', 'R1B', ...
+    'Mz0_P', 'Mz0_L', 'Mz0_B', 'Mz0_A'};
 
 nfit = 0;
 for n = 1:length(params_all)
@@ -372,17 +382,17 @@ end
 % account for timepoints where no pyruvate flip applied
 I_pyruvate_flip = isfinite(Mz_pyr);
 Mz_pyr = interp1(find(I_pyruvate_flip), Mz_pyr(I_pyruvate_flip), 1:length(Mz_pyr),'linear',0);
-I_urea_flip = isfinite(Mz_urea);
-Mz_urea = interp1(find(I_urea_flip), Mz_urea(I_urea_flip), 1:length(Mz_urea),'linear',0);
 
 % force Mz pyruvate based on signal
 Mz_all(1,:) = Mz_pyr;
 Mz_all(2,Istart) = Mz0_L;
-Mz_all(3,:) = Mz_urea;
+Mz_all(3,Istart) = Mz0_B;
+Mz_all(4,Istart) = Mz0_A;
 
-A = [-R1P-kPL,     0,      0,     
-      +kPL,       -R1L,    0,
-      0,           0,     +Ktrans_U];
+A = [-R1P-kPL-kPB-kPA, 0, 0, 0
+    +kPL, -R1L, 0, 0
+    +kPB, 0, -R1B, 0
+    +kPA, 0, 0, -R1A];
 
 for It=Istart:N-1
     
@@ -390,10 +400,10 @@ for It=Istart:N-1
     
     % estimate input, assuming this is constant during TR interval
     % This calculation could be improved for noise stability?
-    u(It) = Mz_urea(It+1) * Ktrans_U;
+    u(It) = ( Mz_pyr(It+1) - Mz_init(1)*exp((- R1P - kPL - kPB - kPA)*TR(It)) ) * (R1P + kPL + kPB + kPA) / (1 - exp((- R1P - kPL - kPB - kPA)*TR(It)));
     
-    xstar = - inv(A)*[u(It),u(It),0].';
-
+    xstar = - inv(A)*[u(It),0,0,0].';
+    
     % solve next time point under assumption of constant input during TR
     Mz_all(:,It+1) = xstar + expm(A*TR(It)) * (Mz_init - xstar);
     
@@ -402,14 +412,14 @@ end
 
 % reverse in time
 for It=Istart:-1:2
-      
+    
     Mz_init = Mz_all(:,It);
     
     % estimate input, assuming this is constant during TR interval
     % This calculation could be improved for noise stability?
-    u(It) = Mz_urea(It+1) * Ktrans_U;
+    u(It-1) = ( Mz_pyr(It-1)*Mzscale(1,It-1) - Mz_init(1)*exp((- R1P - kPL - kPB - kPA)*-TR(It)) ) * (R1P + kPL + kPB + kPA) / (1 - exp((- R1P - kPL - kPB - kPA)*-TR(It)));
     
-    xstar = - inv(A)*[u(It-1),u(It-1),0].';
+    xstar = - inv(A)*[u(It-1),0,0,0].';
     
     % solve previous time point under assumption of constant input during TR
     Mz_plus = xstar + expm(A*-TR(It)) * (Mz_init - xstar);
