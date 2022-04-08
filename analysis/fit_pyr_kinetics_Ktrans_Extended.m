@@ -78,20 +78,20 @@ end
 params_all = {'kPL', ...
               'R1P', 'R1L', 'R1U', ...
               'Mz0_P', 'Mz0_L', 'Mz0_U', ...
-              'Ktrans_U'};
+              'Ktrans_U', 'UreaPyr_ratio'};
 
 params_default_est = [0.01 ...
                       1/30, 1/25, 1/60, ...
                       0, 0, 0, ...
-                      0.5] ;
+                      0.5, 1] ;
 params_default_lb = [-Inf, ...
                      1/50, 1/50, 1/100, ...
                      -Inf, -Inf, -Inf, ...
-                     -Inf]; 
+                     -Inf, 0]; 
 params_default_ub = [Inf, Inf, Inf, ...
                      1/10, 1/10, 1/5, ...
                      Inf, Inf, Inf, ...
-                     Inf];
+                     Inf, Inf];
 
 
 if nargin < 4 || isempty(params_fixed)
@@ -102,7 +102,7 @@ if nargin < 5 || isempty(params_est)
     params_est = struct([]);
 end
 
-products_string = {'lactate'};
+mets_string = {'pyruvate', 'lactate', 'urea'};
 
 % By default, fix the relaxation rates
 
@@ -160,8 +160,8 @@ Sreshape = reshape(S, [prod(Nx), Nmets, Nt]);  % put all spatial locations in fi
 
 params_fit_vec = zeros([prod(Nx),Nparams_to_fit]);  objective_val = zeros([1,prod(Nx)]);
 lb = zeros([prod(Nx),Nparams_to_fit]); ub = zeros([prod(Nx),Nparams_to_fit]); err = zeros([prod(Nx),Nparams_to_fit]);
-Sfit = zeros([prod(Nx),Nmets-1,Nt]); ufit = zeros([prod(Nx),Nt]);
-Rsq = zeros([prod(Nx),Nmets-1]); CHIsq = zeros([prod(Nx),Nmets-1]);
+Sfit = zeros([prod(Nx),Nmets,Nt]); ufit = zeros([prod(Nx),Nt]);
+Rsq = zeros([prod(Nx),Nmets]); CHIsq = zeros([prod(Nx),Nmets]);
 
 for i=1:size(Sreshape, 1)
     % observed magnetization (Mxy)
@@ -204,7 +204,7 @@ for i=1:size(Sreshape, 1)
         
         [Mzfit, ufit(i,:)] = trajectories_inputless(params_fit_vec(i,:), params_fixed, TR,  Mzscale, Mz(1,:), Mz(3,:), Istart);
         
-        Sfit(i,:,:) = Mzfit(2:Nmets,:)  .* Sscale(2:Nmets, :);
+        Sfit(i,:,:) = Mzfit  .* Sscale;
         ufit(i,:) = ufit(i,:)  .* Sscale(1, :);
         
         I_flip = isfinite(Mz);
@@ -224,22 +224,14 @@ for i=1:size(Sreshape, 1)
            
             figure(99)
             subplot(2,1,1)
-            plot(t(I_flip(1,:)), Mz(1,I_flip(1,:)), '-x',t(I_flip(1,:)), ufit(i,I_flip(1,:))./ Sscale(1, I_flip(1,:)), 'k:')
-            hold on
-            for I = 2:Nmets
-                plot(t(I_flip(I,:)), Mz(I,I_flip(I,:)), '-x', t, Mzfit(I,:), '--');
-            end
-            hold off
+            plot(t, Mz, '-x', t, Mzfit, '--', ...
+                t(I_flip(1,:)), ufit(i,I_flip(1,:))./ Sscale(1, I_flip(1,:)), 'k:');
             xlabel('time (s)')
             ylabel('state magnetization (au)')
 
             subplot(2,1,2)
-            plot(t(I_flip(1,:)), Mxy(1,I_flip(1,:)), '-x',t(I_flip(1,:)), ufit(i,I_flip(1,:)), 'k:')
-            hold on
-            for I = 2:Nmets
-                plot(t(I_flip(I,:)), Mxy(I,I_flip(I,:)), '-x', t(I_flip(I,:)),  squeeze(Sfit(i,I-1,I_flip(I,:))), '--')
-            end
-            hold off
+                plot(t, Mxy, '-x', t,  squeeze(Sfit(i,:,:)), '--', ...
+                    t(I_flip(1,:)), ufit(i,I_flip(1,:)), 'k:')
             xlabel('time (s)')
             ylabel('signal (au)')
             
@@ -250,12 +242,11 @@ for i=1:size(Sreshape, 1)
             title(fit_results_string)
             disp(fit_results_string)
             
-            products_legend{1} = 'pyruvate';
-            products_legend{2} = 'input estimate';
-            for n = 1:Nmets-1
-                products_legend{2*n+1} = products_string{n};
-                products_legend{2*n+2} = [products_string{n} ' fit'];
+            for n = 1:Nmets
+                products_legend{n} = mets_string{n};
+                products_legend{n+Nmets} = [mets_string{n} ' fit'];
             end    
+            products_legend{2*Nmets+1} = 'input estimate';
             legend( products_legend)
             drawnow, pause(0.5)
         end
@@ -263,9 +254,9 @@ for i=1:size(Sreshape, 1)
 end
 
 error_metrics=struct('objective_val', objective_val);
-for n = 1:length(products_string)
-    error_metrics.(products_string{n}).Rsq = Rsq(:,n);
-    error_metrics.(products_string{n}).CHIsq = CHIsq(:,n);
+for n = 1:length(mets_string)
+    error_metrics.(mets_string{n}).Rsq = Rsq(:,n);
+    error_metrics.(mets_string{n}).CHIsq = CHIsq(:,n);
 end
 
 params_fit = struct([]);
@@ -288,24 +279,24 @@ if length(Nx) > 1
         end
     end
     
-    Sfit = reshape(Sfit, [Nx, Nmets-1, Nt]);
+    Sfit = reshape(Sfit, [Nx, Nmets, Nt]);
     ufit = reshape(ufit, [Nx, Nt]);
 
     error_metrics.objective_val = reshape(error_metrics.objective_val, Nx);
-    for n = 1:length(products_string)
-        error_metrics.(products_string{n}).Rsq = reshape(error_metrics.(products_string{n}).Rsq, Nx);
-        error_metrics.(products_string{n}).CHIsq =  reshape(error_metrics.(products_string{n}).CHIsq, Nx);
+    for n = 1:length(mets_string)
+        error_metrics.(mets_string{n}).Rsq = reshape(error_metrics.(mets_string{n}).Rsq, Nx);
+        error_metrics.(mets_string{n}).CHIsq =  reshape(error_metrics.(mets_string{n}).CHIsq, Nx);
     end
     disp('100 % complete')
 end
 
 end
 
-function diff_products = difference_inputless(params_fit, params_fixed, TR, Mzscale, Sscale, Mz, Istart, Nmets)
+function diff = difference_inputless(params_fit, params_fixed, TR, Mzscale, Sscale, Mz, Istart, Nmets)
 Mzfit = trajectories_inputless(params_fit, params_fixed, TR,  Mzscale, Mz(1,:),Mz(3,:), Istart) ;
-temp_diff = (Mz - Mzfit) .* Sscale; % compute difference in the signal (Mxy) domain
-diff_products = temp_diff(2:Nmets,:); % only differences are in the metabolic products
-diff_products = diff_products(isfinite(diff_products));
+diff = (Mz - Mzfit) .* Sscale; % compute difference in the signal (Mxy) domain
+%diff_products = temp_diff(2:Nmets,:); % only differences are in the metabolic products
+%diff_products = diff_products(isfinite(diff_products));
 end
 
 function [ l1 ] = negative_log_likelihood_rician_inputless(params_fit, params_fixed, TR, Mzscale, Mz, noise_level, Istart, Nmets)
@@ -352,7 +343,7 @@ u = zeros(1,N);
 params_all = {'kPL', ...
               'R1P', 'R1L', 'R1U', ...
               'Mz0_P', 'Mz0_L', 'Mz0_U', ...
-              'Ktrans_U'};
+              'Ktrans_U', 'UreaPyr_ratio'};
 
 nfit = 0;
 for n = 1:length(params_all)
@@ -370,7 +361,7 @@ Mz_pyr = interp1(find(I_pyruvate_flip), Mz_pyr(I_pyruvate_flip), 1:length(Mz_pyr
 I_urea_flip = isfinite(Mz_urea);
 Mz_urea = interp1(find(I_urea_flip), Mz_urea(I_urea_flip), 1:length(Mz_urea),'linear',0);
 
-% force Mz pyruvate based on signal
+% force Mz pyruvate and urea based on signal
 Mz_all(1,:) = Mz_pyr;
 Mz_all(2,Istart) = Mz0_L;
 Mz_all(3,:) = Mz_urea;
@@ -379,15 +370,23 @@ A = [-R1P-kPL,     0,      0,
       +kPL,       -R1L,    0,
       0,           0,     -R1U];
 
+% UreaPyr_noiseratio = UreaPyr_ratio * Mzscale
+  
 for It=Istart:N-1
     
     Mz_init = Mz_all(:,It) .* Mzscale(:, It);
     
     % estimate input, assuming this is constant during TR interval
     % This calculation could be improved for noise stability?
-    u(It) = Mz_urea(It+1) * Ktrans_U;
-    
-    xstar = - inv(A)*[u(It),0,u(It)].';
+    u_pyr(It) = ( Mz_pyr(It+1) - Mz_init(1)*exp((- R1P - kPL)*TR(It+1)) ) * (R1P + kPL ) / (1 - exp((- R1P - kPL )*TR(It+1)));
+    u_urea(It) = ( Mz_urea(It+1) - Mz_init(3)*exp((- R1U)*TR(It+1)) ) * (R1U) / (1 - exp((- R1U)*TR(It+1)));
+
+%    u(It) = Mz_urea(It+1) * Ktrans_U;
+    % average estimates of input from urea and pyruvate, with weighting by their
+    % expected relative signal amplitudes (assume proportional to SNR)
+    u(It) = u_pyr(It) / (1+UreaPyr_ratio.^2) + u_urea(It) / UreaPyr_ratio / (1 + 1/UreaPyr_ratio.^2); 
+
+    xstar = - inv(A)*[u(It),0,u(It)*UreaPyr_ratio].';
 
     % solve next time point under assumption of constant input during TR
     Mz_all(:,It+1) = xstar + expm(A*TR(It+1)) * (Mz_init - xstar);
