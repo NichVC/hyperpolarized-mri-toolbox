@@ -4,8 +4,8 @@ clear all
 
 % Test values
 Tin = 0; Tacq = 48; TR = 3; N = Tacq/TR;
-R1P = 1/25; R1L = 1/25; R1B = 1/15; R1A = 1/25;
-kPL = 0.05; kPB = 0.03; kPA = 0.02;
+R1P = 1/25; R1L = 1/25; R1U = 1/15;
+kPL = 0.05; 
 std_noise = 0.005;
 
 input_condition = 1; % choose from various simulated starting conditions
@@ -14,37 +14,21 @@ switch input_condition
         % gamma variate input function - most realistic
         Tarrival = 0;  Tbolus = 12;
         input_function = realistic_input_function(N, TR, Tarrival, Tbolus);
-        Mz0 = [0,0,0,0]; 
+        Mz0 = [0,0,0]; 
     case 2
         % boxcar input function
         Tbolus = 12;  Tarrival = 0;
         Ibolus = [1:round(Tbolus/TR)] + round(Tarrival/TR);
         Rinj = 1/Tbolus; % normalize for a total magnetization input = 1
-        Mz0 = [0,0,0,0]; input_function(Ibolus) =  Rinj*TR;
+        Mz0 = [0,0,0]; input_function(Ibolus) =  Rinj*TR;
     case 3
-        Mz0 = [1.5,0,0,0]; % no input function
+        Mz0 = [1.5,0,1]; % no input function
     case 4
         Tin = 6; Mz0 = Tin; % no input function, delayed start
         input_function = [];
 end
 
-% Test over multiple combinations of flip angle schemes
-flips(1:2,1:N,1) = ones(2,N)*30*pi/180;  flip_descripton{1} = 'constant, single-band';
-flips(1:2,1:N,2) = repmat([20;35]*pi/180,[1 N]);  flip_descripton{2} = 'constant, multi-band';
-
-k12 = 0.05; % for variable flip angle designs
-flips(1:2,1:N,3) = [vfa_const_amp(N, pi/2, exp(-TR * ( k12))); ... % T1-effective pyruvate variable flip angles
-    vfa_opt_signal(N, exp(-TR * ( R1L)))]; % max lactate SNR variable flip angle
-flip_descripton{3} = 'max product SNR variable flip, multi-band';
-% flips(1:2,1:N,4) = repmat(vfa_const_amp(N, pi/2), [2,1]);  % RF compensated variable flip angle
-% flips(1:2,1:N,5) = [vfa_const_amp(N, pi/2, exp(-TR * ( k12))); ... % T1-effective variable flip angle
-%     vfa_const_amp(N, pi/2, exp(-TR * ( - k12)))];
-% flips(1:2,1:N,6) = [vfa_const_amp(N, pi/2, exp(-TR * (k12))); ... % saturation recovery
-%     ones(1,N)*pi/2];
-
-flips = cat(1, flips, repmat( flips(2,:,:), [2 1 1]));
-
-N_flip_schemes = size(flips,3);
+flips = repmat([20;35;20]*pi/180,[1 N]); 
 
 t = [0:N-1]*TR + Tin;
 
