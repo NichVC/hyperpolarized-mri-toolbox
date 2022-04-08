@@ -2,11 +2,38 @@
 
 clear all
 
+
+
+%% Testing parameters here identify two potential areas of value:
+
+test_scenario = 3;
+switch test_scenario
+    
+    case 1 % "normal"
+        std_noise = 0.02; UreaPyr_ratio = 1;  % comparable SNRs
+        flips = repmat([20;35;20]*pi/180,[1 N]);  % flip anlges for [pyruvate; lactate; urea]
+    case 2
+        % if pyruvate SNR is low, but urea is high, this seems to improve the kPL
+        % estimates
+        std_noise = 0.04; UreaPyr_ratio = 4;  % low SNR pyruvate, high SNR urea
+        %std_noise = 0.02; UreaPyr_ratio = 1;  % comparable SNRs
+        %std_noise = 0.02; UreaPyr_ratio = 1/4;  % high SNR pyruvate, low SNR urea
+        flips = repmat([20;35;20]*pi/180,[1 N]);  % flip anlges for [pyruvate; lactate; urea]
+        
+    case 3
+        % can potentially use very small or no flip angle on pyruvate, and still
+        % estimate kPL
+        flips = repmat([1;35;20]*pi/180,[1 N]); % can get away without sampling pyruvate
+        std_noise = 0.015; UreaPyr_ratio = 1;
+        
+end
+
+%%
+
 % Test values
 Tin = 0; Tacq = 48; TR = 3; N = Tacq/TR;
 R1P = 1/25; R1L = 1/25; R1U = 1/15;
 kPL = 0.05; 
-std_noise = 0.01;
 
 input_condition = 1; % choose from various simulated starting conditions
 switch input_condition
@@ -28,14 +55,10 @@ switch input_condition
         input_function = [];
 end
 
-flips = repmat([20;35;20]*pi/180,[1 N]); 
-
 t = [0:N-1]*TR + Tin;
 
 % generate simulated data
 noise_S = randn([3 N])*std_noise;  % same noise for all flip schedules
-UreaPyr_ratio = rand(1)*2;
-UreaPyr_ratio = 1/2;
 
 [Mxy_PL, Mz_PL] = simulate_Nsite_model(Mz0(1:2), [R1P R1L], [kPL 0], flips(1:2,:), TR, input_function);
 [Mxy_U, Mz_U] = simulate_Nsite_model(Mz0(3), [R1U], [], flips(3,:), TR, input_function);

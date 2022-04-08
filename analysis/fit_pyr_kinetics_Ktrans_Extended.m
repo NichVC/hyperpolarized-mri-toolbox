@@ -202,7 +202,7 @@ for i=1:size(Sreshape, 1)
                 [params_fit_vec(i,:), objective_val(i)] = fminunc(obj, params_est_vec, options);
         end
         
-        [Mzfit, ufit(i,:)] = trajectories_inputless(params_fit_vec(i,:), params_fixed, TR,  Mzscale, Mz(1,:), Mz(3,:), Istart);
+        [Mzfit, ufit(i,:)] = trajectories_inputless(params_fit_vec(i,:), params_fixed, TR,  Mzscale, Sscale, Mz(1,:), Mz(3,:), Istart);
         
         Sfit(i,:,:) = Mzfit  .* Sscale;
         ufit(i,:) = ufit(i,:)  .* Sscale(1, :);
@@ -211,12 +211,12 @@ for i=1:size(Sreshape, 1)
  
         % Note that Sfit only inlcudes products signals, not pyruvate,
         % hence the difference in indexing here and in plots below
-        for I = 2:Nmets
-            Rsq(i,I-1) = 1 - sum( (Sreshape(i,I,I_flip(I,:))-Sfit(i,I-1,I_flip(I,:))).^2 ,3 ) ...
+        for I = 1:Nmets
+            Rsq(i,I) = 1 - sum( (Sreshape(i,I,I_flip(I,:))-Sfit(i,I,I_flip(I,:))).^2 ,3 ) ...
                 ./ sum( (Sreshape(i,I,I_flip(I,:)) - repmat(mean(Sreshape(i,I,I_flip(I,:)),3),[1 1 length(find(I_flip(I,:)))])).^2, 3);
             % chi squared distance - also pdist2 in Octave
-            CHIsq(i,I-1) = sum( (Sreshape(i,I,I_flip(I,:))-Sfit(i,I-1,I_flip(I,:))).^2 ./ ...
-                (Sreshape(i,I,I_flip(I,:))+Sfit(i,I-1,I_flip(I,:))) ,3) / 2;
+            CHIsq(i,I) = sum( (Sreshape(i,I,I_flip(I,:))-Sfit(i,I,I_flip(I,:))).^2 ./ ...
+                (Sreshape(i,I,I_flip(I,:))+Sfit(i,I,I_flip(I,:))) ,3) / 2;
         end
         
         if plot_flag
@@ -293,13 +293,13 @@ end
 end
 
 function diff = difference_inputless(params_fit, params_fixed, TR, Mzscale, Sscale, Mz, Istart, Nmets)
-Mzfit = trajectories_inputless(params_fit, params_fixed, TR,  Mzscale, Mz(1,:),Mz(3,:), Istart) ;
+Mzfit = trajectories_inputless(params_fit, params_fixed, TR,  Mzscale, Sscale, Mz(1,:),Mz(3,:), Istart) ;
 diff = (Mz - Mzfit) .* Sscale; % compute difference in the signal (Mxy) domain
 %diff_products = temp_diff(2:Nmets,:); % only differences are in the metabolic products
 %diff_products = diff_products(isfinite(diff_products));
 end
 
-function [ l1 ] = negative_log_likelihood_rician_inputless(params_fit, params_fixed, TR, Mzscale, Mz, noise_level, Istart, Nmets)
+function [ l1 ] = negative_log_likelihood_rician_inputless(params_fit, params_fixed, TR, Mzscale, Sscale, Mz, noise_level, Istart, Nmets)
 %FUNCTION NEGATIVE_LOG_LIKELIHOOD_RICIAN Computes log likelihood for
 %    compartmental model with Rician noise
 % noise level is scaled for state magnetization (Mz) domain
@@ -309,7 +309,7 @@ function [ l1 ] = negative_log_likelihood_rician_inputless(params_fit, params_fi
 N = size(Mzscale,2);
 
 % compute trajectory of the model with parameter values
-Mzfit = trajectories_inputless(params_fit, params_fixed, TR,  Mzscale, Mz(1,:), Mz(3,:), Istart) ;
+Mzfit = trajectories_inputless(params_fit, params_fixed, TR,  Mzscale, Sscale, Mz(1,:), Mz(3,:), Istart) ;
 
 % compute negative log likelihood
 l1 = 0;
@@ -327,7 +327,7 @@ for t = 1:N
 end
 end
 
-function [Mz_all, u] = trajectories_inputless( params_fit, params_fixed, TR, Mzscale , Mz_pyr, Mz_urea, Istart)
+function [Mz_all, u] = trajectories_inputless( params_fit, params_fixed, TR, Mzscale, Sscale , Mz_pyr, Mz_urea, Istart)
 % Compute product magnetizations using a uni-directional two-site model
 % Uses substrate magnetization measurements, estimated relaxation and
 % conversion rates
@@ -362,15 +362,15 @@ I_urea_flip = isfinite(Mz_urea);
 Mz_urea = interp1(find(I_urea_flip), Mz_urea(I_urea_flip), 1:length(Mz_urea),'linear',0);
 
 % force Mz pyruvate and urea based on signal
-Mz_all(1,:) = Mz_pyr;
+Mz_all(1,:) = Mz0_P;
 Mz_all(2,Istart) = Mz0_L;
-Mz_all(3,:) = Mz_urea;
+Mz_all(3,:) = Mz0_U;
 
 A = [-R1P-kPL,     0,      0,     
       +kPL,       -R1L,    0,
       0,           0,     -R1U];
 
-% UreaPyr_noiseratio = UreaPyr_ratio * Mzscale
+UreaPyr_Mz_variance_ratio = Sscale(1,:).^2 ./ (Sscale(3,:).^2 * UreaPyr_ratio.^2);
   
 for It=Istart:N-1
     
@@ -383,8 +383,9 @@ for It=Istart:N-1
 
 %    u(It) = Mz_urea(It+1) * Ktrans_U;
     % average estimates of input from urea and pyruvate, with weighting by their
-    % expected relative signal amplitudes (assume proportional to SNR)
-    u(It) = u_pyr(It) / (1+UreaPyr_ratio.^2) + u_urea(It) / UreaPyr_ratio / (1 + 1/UreaPyr_ratio.^2); 
+    % based on expected ratio of noise in the Mz domain
+    % using optimal linear estimator with unequal noise levels https://www.sciencedirect.com/science/article/abs/pii/0165168495000156
+    u(It) = u_pyr(It) / (1+1/UreaPyr_Mz_variance_ratio(It)) + u_urea(It) / UreaPyr_ratio / (1 + UreaPyr_Mz_variance_ratio(It)); 
 
     xstar = - inv(A)*[u(It),0,u(It)*UreaPyr_ratio].';
 
