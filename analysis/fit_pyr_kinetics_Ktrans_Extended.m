@@ -361,7 +361,6 @@ Mz_pyr = interp1(find(I_pyruvate_flip), Mz_pyr(I_pyruvate_flip), 1:length(Mz_pyr
 I_urea_flip = isfinite(Mz_urea);
 Mz_urea = interp1(find(I_urea_flip), Mz_urea(I_urea_flip), 1:length(Mz_urea),'linear',0);
 
-% force Mz pyruvate and urea based on signal
 Mz_all(1,:) = Mz0_P;
 Mz_all(2,Istart) = Mz0_L;
 Mz_all(3,:) = Mz0_U;
